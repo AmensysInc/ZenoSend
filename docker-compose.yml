@@ -1,0 +1,74 @@
+version: "3.9"
+
+services:
+  api:
+    build: ./app
+    container_name: sg-lite-api
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "8081:8000" # API -> http://localhost:8080
+    volumes:
+      - ./app:/code
+    environment:
+      PYTHONPATH: /code
+    command: >
+      bash -lc "python scripts/wait_for_db.py &&
+                python init_db.py &&
+                uvicorn main:app --host 0.0.0.0 --port 8000"
+
+  worker:
+    build: ./app
+    container_name: sg-lite-worker
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./app:/code
+    environment:
+      PYTHONPATH: /code
+    command: >
+      bash -lc "python scripts/wait_for_db.py &&
+                celery -A tasks.celery_app worker --loglevel=INFO --concurrency=4"
+
+  redis:
+    image: redis:7
+    container_name: sg-lite-redis
+    ports:
+      - "6379:6379"
+
+  db:
+    image: postgres:16
+    container_name: sg-lite-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: sg_lite
+      POSTGRES_USER: sguser
+      POSTGRES_PASSWORD: sgpass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: sg-lite-mailpit
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI
+
+  frontend:
+    build:
+      context: ./sendgrid_lite_frontend
+      args:
+        VITE_API_BASE: /api # proxied by nginx inside this container
+        VITE_API_KEY: "" # key is injected by nginx, not exposed to browser
+    container_name: sg-lite-frontend
+    depends_on:
+      - api
+    ports:
+      - "3000:80" # Frontend -> http://localhost:3000
+
+volumes:
+  pgdata:
