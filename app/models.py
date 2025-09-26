@@ -1,6 +1,9 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, func
+from sqlalchemy.orm import relationship
+import enum
 from db import Base
 
 class Contact(Base):
@@ -14,6 +17,8 @@ class Contact(Base):
     reason = Column(String(255), nullable=True)
     provider = Column(String(80), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    owner = relationship("User", back_populates="contacts")
 
 class Campaign(Base):
     __tablename__ = "campaigns"
@@ -36,3 +41,17 @@ class Message(Base):
 
     campaign = relationship("Campaign")
     contact = relationship("Contact")
+
+class RoleEnum(str, enum.Enum):
+    user = "user"
+    admin = "admin"
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(Enum(RoleEnum), default=RoleEnum.user, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    contacts = relationship("Contact", back_populates="owner")

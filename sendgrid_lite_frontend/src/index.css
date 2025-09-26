@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --background: 222 47% 6%;
+        --foreground: 210 20% 98%;
+
+        --card: 222 47% 8%;
+        --card-foreground: 210 20% 98%;
+
+        --muted: 217 19% 27%;
+        --muted-foreground: 215 16% 72%;
+
+        --primary: 217 91% 60%;
+        --primary-foreground: 222 47% 6%;
+
+        --border: 215 28% 17%;
+        --input: 215 28% 17%;
+        --ring: 217 91% 60%;
+    }
+
+    * {
+        @apply border-border;
+    }
+
+    body {
+        @apply bg-background text-foreground;
+    }
+}
+
+/* Optional helpers (no self-referential @apply) */
+.bg-email-header {
+    @apply bg-card;
+}
+
+.bg-gradient-card {
+    @apply bg-card;
+}
+
+.border-input-border {
+    @apply border-border;
+}
+
+.bg-input {
+    @apply bg-card;
+}
+
+.bg-primary-hover {
+    filter: brightness(0.95);
+}
+
+/* ❌ remove this one (it caused the loop): .text-muted-foreground { @apply text-muted-foreground; } */

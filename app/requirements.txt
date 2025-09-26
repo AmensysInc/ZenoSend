@@ -11,3 +11,5 @@ python-dotenv==1.0.1
 email-validator==2.2.0
 dnspython==2.6.1
 jinja2==3.1.4
+passlib==1.7.4
+PyJWT==2.8.0

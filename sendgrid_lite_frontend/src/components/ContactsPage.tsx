@@ -1,146 +1,251 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { createContact, getContacts } from '../api'
-
-type Contact = {
-    id: number
-    first_name?: string | null
-    last_name?: string | null
-    email: string
-    linkedin_url?: string | null
-    status: string
-    reason?: string | null
-    provider?: string | null
-}
-
-const STATUS_OPTIONS = ['', 'new', 'valid', 'invalid', 'risky', 'unknown']
+// src/components/ContactsPage.tsx
+import React, { useEffect, useMemo, useState } from 'react';
+import { ContactRow, createContact, getContacts, validateOne } from '../api';
+import { useAuth } from '../auth';
 
 export default function ContactsPage() {
-    const [list, setList] = useState<Contact[]>([])
-    const [status, setStatus] = useState<string>('') // all
-    const [q, setQ] = useState('')
-    const [loading, setLoading] = useState(false)
-    const [msg, setMsg] = useState('')
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
 
-    // form
-    const [firstName, setFirstName] = useState('')
-    const [lastName, setLastName] = useState('')
-    const [email, setEmail] = useState('')
-    const [linkedin, setLinkedin] = useState('')
+    const [rows, setRows] = useState<ContactRow[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [err, setErr] = useState<string | null>(null);
 
-    const load = async () => {
-        setLoading(true)
+    // create form
+    const [fn, setFn] = useState('');
+    const [ln, setLn] = useState('');
+    const [email, setEmail] = useState('');
+    const [linkedin, setLinkedin] = useState('');
+
+    // Always-on SMTP probe (UI shows checked + disabled)
+    const useSmtp = true;
+
+    // inline validate result preview (optional)
+    const [valBusy, setValBusy] = useState(false);
+    const [valResult, setValResult] = useState<{ status: string; reason?: string | null; provider?: string | null } | null>(null);
+
+    // filters/search
+    const [status, setStatus] = useState<'all' | 'new' | 'valid' | 'invalid' | 'risky' | 'unknown'>('all');
+    const [q, setQ] = useState('');
+
+    async function load() {
+        setLoading(true);
+        setErr(null);
         try {
-            const rows = await getContacts(status || undefined, q || undefined)
-            setList(rows as Contact[])
+            const data = await getContacts(status === 'all' ? undefined : status, q || undefined);
+            setRows(data);
         } catch (e: any) {
-            setMsg(e.message || 'Failed to load contacts')
+            setErr(e.message || 'Failed to load contacts');
         } finally {
-            setLoading(false)
+            setLoading(false);
         }
     }
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+    function onRefresh() { load(); }
 
-    useEffect(() => { load() /* on mount */ }, [])
-    useEffect(() => { load() /* on filter/search change */ }, [status])
-
-    const onSearch = async (e: React.FormEvent) => { e.preventDefault(); load() }
-
-    const onCreate = async (e: React.FormEvent) => {
-        e.preventDefault()
-        setMsg('')
-        if (!email.trim()) { setMsg('Email is required'); return }
+    // --- Actions ---
+    async function onSave(e: React.FormEvent) {
+        e.preventDefault();
+        setErr(null);
         try {
+            if (!email.trim()) throw new Error('Email is required');
             await createContact({
-                first_name: firstName || undefined,
-                last_name: lastName || undefined,
-                email: email.trim(),
-                linkedin_url: linkedin || undefined,
-            })
-            setFirstName(''); setLastName(''); setEmail(''); setLinkedin('')
-            setMsg('Contact saved')
-            await load()
-        } catch (err: any) {
-            setMsg(err.message || 'Failed to save contact')
+                first_name: fn || undefined,
+                last_name: ln || undefined,
+                email: email.trim().toLowerCase(),
+                linkedin_url: linkedin || undefined
+            });
+            setFn(''); setLn(''); setEmail(''); setLinkedin(''); setValResult(null);
+            await load();
+        } catch (e: any) {
+            setErr(e.message || 'Failed to create contact');
         }
     }
 
-    const rows = useMemo(() => list, [list])
+    // Validate & Save = validateOne (SMTP on) then attach names/link
+    async function onValidateAndSave(e: React.FormEvent) {
+        e.preventDefault();
+        if (!email.trim()) { setErr('Email is required'); return; }
+        setErr(null);
+        setValBusy(true);
+        try {
+            const addr = email.trim().toLowerCase();
+            const r = await validateOne(addr, useSmtp);
+            setValResult({ status: r.status, reason: r.reason ?? null, provider: r.provider ?? null });
+            await createContact({
+                first_name: fn || undefined,
+                last_name: ln || undefined,
+                email: addr,
+                linkedin_url: linkedin || undefined
+            });
+            setFn(''); setLn(''); setEmail(''); setLinkedin('');
+            await load();
+        } catch (e: any) {
+            setErr(e.message || 'Validate & Save failed');
+        } finally {
+            setValBusy(false);
+        }
+    }
+
+    // Row-level validate/re-validate
+    async function validateRow(addr: string) {
+        setErr(null);
+        setValBusy(true);
+        try {
+            await validateOne(addr, useSmtp);
+            await load();
+        } catch (e: any) {
+            setErr(e.message || 'Validation failed');
+        } finally {
+            setValBusy(false);
+        }
+    }
+
+    const filtered = useMemo(() => rows, [rows]); // server filters applied
 
     return (
-        <>
-            <div className="card">
-                <h2>Contacts</h2>
-                <p style={{ color: '#8aa0b6', marginTop: -10 }}>Create a contact and manage your list. Validation happens from the Validate page or via bulk validate.</p>
+        <div className="container mx-auto p-6 max-w-6xl">
+            <div className="card p-4 mb-6">
+                <div className="text-lg font-semibold mb-1">Contacts</div>
+                <div className="text-sm opacity-70">
+                    Create a contact and manage your list. Use <b>Validate &amp; Save</b> for one-click validation
+                    (SMTP probe on) or plain <b>Save</b>. You can validate later from each row as well.
+                </div>
             </div>
 
-            <div className="card" style={{ display: 'grid', gap: 12 }}>
-                <h3 style={{ margin: 0 }}>Create Contact</h3>
-                <form onSubmit={onCreate} className="row" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-                    <input placeholder="First name" value={firstName} onChange={e => setFirstName(e.target.value)} />
-                    <input placeholder="Last name" value={lastName} onChange={e => setLastName(e.target.value)} />
-                    <input placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
-                    <input placeholder="LinkedIn URL" value={linkedin} onChange={e => setLinkedin(e.target.value)} />
-                    <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, alignItems: 'center' }}>
-                        <button className="btn" type="submit">Save</button>
-                        {msg && <span style={{ color: '#8aa0b6' }}>{msg}</span>}
-                    </div>
-                </form>
-            </div>
+            {/* Create + Validate & Save */}
+            <form onSubmit={onSave} className="card p-4 mb-6 space-y-3">
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+                    <input className="input" placeholder="First name" value={fn} onChange={e => setFn(e.target.value)} />
+                    <input className="input" placeholder="Last name" value={ln} onChange={e => setLn(e.target.value)} />
+                    <input className="input" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+                    <input className="input" placeholder="LinkedIn URL" value={linkedin} onChange={e => setLinkedin(e.target.value)} />
+                </div>
 
-            <div className="card" style={{ display: 'grid', gap: 12 }}>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                        <label>Filter by status:</label>
-                        <select value={status} onChange={e => setStatus(e.target.value)}>
-                            <option value="">all</option>
-                            {STATUS_OPTIONS.slice(1).map(s => <option key={s} value={s}>{s}</option>)}
+                <div className="flex items-center gap-3">
+                    <button type="submit" className="btn">Save</button>
+                    <button type="button" onClick={onValidateAndSave} className="btn" disabled={valBusy}>
+                        {valBusy ? 'Validating…' : 'Validate & Save'}
+                    </button>
+
+                    <label className="flex items-center gap-2 text-sm opacity-80">
+                        <input type="checkbox" checked={useSmtp} disabled />
+                        Use SMTP probe (always on)
+                    </label>
+
+                    {valResult && (
+                        <span className={`ml-2 text-sm px-2 py-[2px] rounded ${valResult.status === 'valid' ? 'bg-emerald-600/20 text-emerald-300' :
+                            valResult.status === 'risky' ? 'bg-amber-500/20 text-amber-300' :
+                                valResult.status === 'invalid' ? 'bg-red-600/20 text-red-300' :
+                                    'bg-slate-600/20 text-slate-300'
+                            }`}>
+                            {valResult.status}
+                            {valResult.provider ? ` · ${valResult.provider}` : ''}
+                            {valResult.reason ? ` · ${valResult.reason}` : ''}
+                        </span>
+                    )}
+                </div>
+
+                {err && <div className="text-red-400 text-sm">{err}</div>}
+            </form>
+
+            {/* Filters + search */}
+            <div className="card p-4 mb-4">
+                <div className="flex flex-col md:flex-row items-start md:items-end gap-3">
+                    <div>
+                        <div className="text-xs opacity-70 mb-1">Filter by status:</div>
+                        <select className="input" value={status} onChange={e => setStatus(e.target.value as any)}>
+                            <option value="all">all</option>
+                            <option value="new">new</option>
+                            <option value="valid">valid</option>
+                            <option value="invalid">invalid</option>
+                            <option value="risky">risky</option>
+                            <option value="unknown">unknown</option>
                         </select>
                     </div>
-                    <form onSubmit={onSearch} style={{ display: 'flex', gap: 8 }}>
-                        <input placeholder="Search name/email/linkedin..." value={q} onChange={e => setQ(e.target.value)} />
-                        <button className="btn" type="submit">Search</button>
-                        <button className="btn" type="button" onClick={load}>Refresh</button>
-                    </form>
-                </div>
-
-                <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead>
-                            <tr>
-                                <th style={{ textAlign: 'left', padding: '8px 6px' }}>First</th>
-                                <th style={{ textAlign: 'left', padding: '8px 6px' }}>Last</th>
-                                <th style={{ textAlign: 'left', padding: '8px 6px' }}>Email</th>
-                                <th style={{ textAlign: 'left', padding: '8px 6px' }}>LinkedIn</th>
-                                <th style={{ textAlign: 'left', padding: '8px 6px' }}>Status</th>
-                                <th style={{ textAlign: 'left', padding: '8px 6px' }}>Reason</th>
-                                <th style={{ textAlign: 'left', padding: '8px 6px' }}>Provider</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {loading && (
-                                <tr><td colSpan={7} style={{ padding: 12, color: '#8aa0b6' }}>Loading…</td></tr>
-                            )}
-                            {!loading && rows.length === 0 && (
-                                <tr><td colSpan={7} style={{ padding: 12, color: '#8aa0b6' }}>No contacts</td></tr>
-                            )}
-                            {rows.map(r => (
-                                <tr key={r.id} style={{ borderTop: '1px solid #253041' }}>
-                                    <td style={{ padding: '8px 6px' }}>{r.first_name || ''}</td>
-                                    <td style={{ padding: '8px 6px' }}>{r.last_name || ''}</td>
-                                    <td style={{ padding: '8px 6px' }}>{r.email}</td>
-                                    <td style={{ padding: '8px 6px' }}>
-                                        {r.linkedin_url ? <a href={r.linkedin_url} target="_blank" rel="noreferrer">Profile</a> : ''}
-                                    </td>
-                                    <td style={{ padding: '8px 6px' }}>
-                                        <span className={`pill ${r.status}`}>{r.status}</span>
-                                    </td>
-                                    <td style={{ padding: '8px 6px' }}>{r.reason || ''}</td>
-                                    <td style={{ padding: '8px 6px' }}>{r.provider || ''}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                    <div className="grow md:max-w-md">
+                        <div className="text-xs opacity-70 mb-1">Search name/email/linkedin:</div>
+                        <div className="flex gap-2">
+                            <input className="input w-full" value={q} onChange={e => setQ(e.target.value)} placeholder="e.g. emily@, LinkedIn URL…" />
+                            <button type="button" className="btn" onClick={load}>Search</button>
+                            <button type="button" className="btn" onClick={() => { setQ(''); setStatus('all'); load(); }}>Refresh</button>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </>
-    )
+
+            {/* Table */}
+            <div className="card p-0 overflow-hidden">
+                <table className="w-full text-sm">
+                    <thead className="bg-slate-900/60">
+                        <tr>
+                            <th className="px-4 py-3 text-left">First</th>
+                            <th className="px-4 py-3 text-left">Last</th>
+                            <th className="px-4 py-3 text-left">Email</th>
+                            <th className="px-4 py-3 text-left">LinkedIn</th>
+                            <th className="px-4 py-3 text-left">Status</th>
+                            <th className="px-4 py-3 text-left">Reason</th>
+                            <th className="px-4 py-3 text-left">Provider</th>
+                            {isAdmin && <th className="px-4 py-3 text-left">Added by</th>}
+                            <th className="px-4 py-3 text-left">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {loading && (
+                            <tr><td className="px-4 py-4 text-slate-400" colSpan={isAdmin ? 9 : 8}>Loading…</td></tr>
+                        )}
+                        {!loading && filtered.length === 0 && (
+                            <tr><td className="px-4 py-4 text-slate-400" colSpan={isAdmin ? 9 : 8}>No contacts.</td></tr>
+                        )}
+                        {filtered.map(r => {
+                            const needsValidation = !r.status || r.status === 'new' || r.status === 'unknown' || r.status === 'risky';
+                            return (
+                                <tr key={r.id} className="border-t border-slate-800/60">
+                                    <td className="px-4 py-3">{r.first_name || ''}</td>
+                                    <td className="px-4 py-3">{r.last_name || ''}</td>
+                                    <td className="px-4 py-3">
+                                        <div className="font-mono">{r.email}</div>
+                                        {isAdmin && r.owner_email && (
+                                            <div className="text-[11px] mt-0.5 opacity-70">Added by {r.owner_email}</div>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3 truncate max-w-[240px]">
+                                        {r.linkedin_url ? (
+                                            <a className="underline opacity-80" href={r.linkedin_url} target="_blank" rel="noreferrer">
+                                                {r.linkedin_url}
+                                            </a>
+                                        ) : ''}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <span className={`px-2 py-[2px] rounded ${r.status === 'valid' ? 'bg-emerald-600/20 text-emerald-300' :
+                                            r.status === 'risky' ? 'bg-amber-500/20 text-amber-300' :
+                                                r.status === 'invalid' ? 'bg-red-600/20 text-red-300' :
+                                                    'bg-slate-600/20 text-slate-300'
+                                            }`}>
+                                            {r.status || '—'}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3">{r.reason || ''}</td>
+                                    <td className="px-4 py-3">{r.provider || ''}</td>
+                                    {isAdmin && <td className="px-4 py-3">{r.owner_email || ''}</td>}
+                                    <td className="px-4 py-3">
+                                        {needsValidation ? (
+                                            <button
+                                                className="btn btn-small"
+                                                onClick={() => validateRow(r.email)}
+                                                disabled={valBusy}
+                                                title="Validate with SMTP probe"
+                                            >
+                                                Validate
+                                            </button>
+                                        ) : <span className="text-xs opacity-50">—</span>}
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
 }

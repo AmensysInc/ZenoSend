@@ -5,12 +5,9 @@ from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
-
 from sqlalchemy.orm import Session
-
-# IMPORTANT: use relative imports (package-aware)
-from .db import SessionLocal
-from .models import Message, Contact, Campaign
+from db import SessionLocal
+from models import Message, Contact, Campaign
 
 # -------------------------------
 # Optional Celery (used if REDIS_URL is reachable)

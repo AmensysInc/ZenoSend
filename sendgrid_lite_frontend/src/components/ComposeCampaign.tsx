@@ -1,70 +1,92 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { composeSend, getContacts } from '../api'
+import React, { useEffect, useMemo, useState } from 'react';
+import { composeSend, getContacts } from '../api'; // <-- your real API module
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { Textarea } from './ui/textarea';
+import { Checkbox } from './ui/checkbox';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Separator } from './ui/separator';
+import { Send, Mail, Users, AlertCircle } from 'lucide-react';
+import { toast } from '../hooks/use-toast';
+
+/**
+ * If you don't already have a MultiSelect component, see section 2 below
+ * for a minimal version. Otherwise import your existing one like:
+ *   import { MultiSelect } from '@/components/ui/multi-select';
+ */
+import { MultiSelect } from './ui/multi-select';
 
 type Contact = {
-    id: number
-    email: string
-    first_name?: string | null
-    last_name?: string | null
-    status: string
-    reason?: string | null
-    provider?: string | null
-}
+    id: number;
+    email: string;
+    first_name?: string | null;
+    last_name?: string | null;
+    status: string;
+    reason?: string | null;
+    provider?: string | null;
+};
 
-export default function ComposeCampain() {
-    const [contacts, setContacts] = useState<Contact[]>([])
-    const [loading, setLoading] = useState(true)
-    const [error, setError] = useState<string | null>(null)
+export default function ComposeCampaign() {
+    const [contacts, setContacts] = useState<Contact[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [sending, setSending] = useState(false);
 
-    const [fromEmail, setFromEmail] = useState('')
-    const [subject, setSubject] = useState('')
-    const [textBody, setTextBody] = useState('')
-    const [htmlBody, setHtmlBody] = useState('')
+    const [fromEmail, setFromEmail] = useState('');
+    const [subject, setSubject] = useState('');
+    const [textBody, setTextBody] = useState('');
+    const [htmlBody, setHtmlBody] = useState('');
 
-    const [toIds, setToIds] = useState<number[]>([])
-    const [ccIds, setCcIds] = useState<number[]>([])
-    const [bccIds, setBccIds] = useState<number[]>([])
+    const [toIds, setToIds] = useState<number[]>([]);
+    const [ccIds, setCcIds] = useState<number[]>([]);
+    const [bccIds, setBccIds] = useState<number[]>([]);
 
-    const [toExtra, setToExtra] = useState('')
-    const [ccExtra, setCcExtra] = useState('')
-    const [bccExtra, setBccExtra] = useState('')
-    const [validateExtras, setValidateExtras] = useState(true)
-
-    const [result, setResult] = useState<string>('')
+    const [toExtra, setToExtra] = useState('');
+    const [ccExtra, setCcExtra] = useState('');
+    const [bccExtra, setBccExtra] = useState('');
+    const [validateExtras, setValidateExtras] = useState(true);
 
     useEffect(() => {
         (async () => {
             try {
-                const rows = await getContacts('valid') as Contact[]
-                setContacts(rows)
+                // Pull only valid contacts for the pickers (matches your backend)
+                const rows = (await getContacts('valid')) as Contact[];
+                setContacts(rows);
             } catch (e: any) {
-                setError(e.message)
+                setError(e.message ?? 'Failed to load contacts');
             } finally {
-                setLoading(false)
+                setLoading(false);
             }
-        })()
-    }, [])
+        })();
+    }, []);
 
-    const options = useMemo(() => contacts.map(c =>
-        <option key={c.id} value={c.id}>{c.email}</option>
-    ), [contacts])
+    const contactOptions = useMemo(
+        () =>
+            contacts.map((c) => ({
+                label: c.email,
+                value: c.id,
+                subtitle:
+                    [c.first_name, c.last_name].filter(Boolean).join(' ') || undefined,
+            })),
+        [contacts]
+    );
 
-    function selToIds(e: React.ChangeEvent<HTMLSelectElement>, setter: (ids: number[]) => void) {
-        const ids = Array.from(e.target.selectedOptions).map(o => Number(o.value))
-        setter(ids)
-    }
-
-    function parseExtras(s: string) {
-        return s.split(/[,\s;]+/).map(x => x.trim()).filter(Boolean)
+    function parseExtras(s: string): string[] {
+        return s.split(/[,\s;]+/).map((x) => x.trim()).filter(Boolean);
     }
 
     async function onSend(e: React.FormEvent) {
-        e.preventDefault()
-        setError(null); setResult('')
+        e.preventDefault();
+        setError(null);
+        setSending(true);
+
         try {
             if (!fromEmail || !subject) {
-                setError('From and Subject are required'); return
+                setError('From and Subject are required');
+                return;
             }
+
             const payload = {
                 name: 'Quick Send',
                 from_email: fromEmail,
@@ -78,103 +100,260 @@ export default function ComposeCampain() {
                 cc_extra: parseExtras(ccExtra),
                 bcc_extra: parseExtras(bccExtra),
                 validate_extras: validateExtras,
-            }
-            const r = await composeSend(payload)
-            setResult(`Campaign ${r.campaign_id} — selected: ${r.selected}, valid: ${r.valid_recipients}, enqueued: ${r.enqueued}`)
+            };
+
+            const r = await composeSend(payload);
+
+            toast({
+                title: 'Campaign Sent',
+                description: `Campaign ${r.campaign_id} — Selected: ${r.selected}, Valid: ${r.valid_recipients}, Enqueued: ${r.enqueued}`,
+            });
+
+            // reset form
+            setFromEmail('');
+            setSubject('');
+            setTextBody('');
+            setHtmlBody('');
+            setToIds([]);
+            setCcIds([]);
+            setBccIds([]);
+            setToExtra('');
+            setCcExtra('');
+            setBccExtra('');
         } catch (e: any) {
-            setError(e.message)
+            const msg = e?.message ?? 'Failed to send';
+            setError(msg);
+            toast({ title: 'Error', description: msg, variant: 'destructive' });
+        } finally {
+            setSending(false);
         }
     }
 
-    if (loading) return <div className="card">Loading…</div>
-    if (error) return <div className="card" style={{ color: '#ff6b6b' }}>Error: {error}</div>
+    const extrasCount =
+        parseExtras(toExtra).length +
+        parseExtras(ccExtra).length +
+        parseExtras(bccExtra).length;
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-background flex items-center justify-center">
+                <div className="flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+                    <span className="text-muted-foreground">Loading contacts...</span>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="card" style={{ maxWidth: 1000 }}>
-            <h2>Compose Campaign</h2>
-
-            <form className="form" onSubmit={onSend} style={{ display: 'grid', gap: 16 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    <label className="label">
-                        <span>From</span>
-                        <input className="input" placeholder="you@company.com"
-                            value={fromEmail} onChange={e => setFromEmail(e.target.value)} required />
-                    </label>
-                    <label className="label">
-                        <span>Subject</span>
-                        <input className="input" placeholder="Subject"
-                            value={subject} onChange={e => setSubject(e.target.value)} required />
-                    </label>
+        <div className="min-h-screen bg-background">
+            <div className="bg-email-header border-b border-border px-6 py-4">
+                <div className="flex items-center space-x-2">
+                    <Mail className="h-6 w-6 text-primary" />
+                    <h1 className="text-2xl font-semibold text-foreground">Compose Campaign</h1>
                 </div>
+            </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-                    <label className="label">
-                        <span>To (valid contacts)</span>
-                        <select multiple className="input" style={{ height: 140 }}
-                            value={toIds.map(String)} onChange={e => selToIds(e, setToIds)}>
-                            {options}
-                        </select>
-                        <small>{toIds.length} selected</small>
-                    </label>
-                    <label className="label">
-                        <span>CC (valid contacts)</span>
-                        <select multiple className="input" style={{ height: 140 }}
-                            value={ccIds.map(String)} onChange={e => selToIds(e, setCcIds)}>
-                            {options}
-                        </select>
-                        <small>{ccIds.length} selected</small>
-                    </label>
-                    <label className="label">
-                        <span>BCC (valid contacts)</span>
-                        <select multiple className="input" style={{ height: 140 }}
-                            value={bccIds.map(String)} onChange={e => selToIds(e, setBccIds)}>
-                            {options}
-                        </select>
-                        <small>{bccIds.length} selected</small>
-                    </label>
-                </div>
+            <div className="container mx-auto px-6 py-8 max-w-6xl">
+                <Card className="shadow-elegant bg-gradient-card border-border">
+                    <CardHeader className="pb-6">
+                        <CardTitle className="flex items-center space-x-2">
+                            <Users className="h-5 w-5 text-primary" />
+                            <span>New Email Campaign</span>
+                        </CardTitle>
+                    </CardHeader>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-                    <label className="label">
-                        <span>Add To (type emails)</span>
-                        <input className="input" placeholder="a@x.com, b@x.com"
-                            value={toExtra} onChange={e => setToExtra(e.target.value)} />
-                    </label>
-                    <label className="label">
-                        <span>Add CC (type emails)</span>
-                        <input className="input" placeholder="a@x.com b@x.com"
-                            value={ccExtra} onChange={e => setCcExtra(e.target.value)} />
-                    </label>
-                    <label className="label">
-                        <span>Add BCC (type emails)</span>
-                        <input className="input" placeholder="a@x.com; b@x.com"
-                            value={bccExtra} onChange={e => setBccExtra(e.target.value)} />
-                    </label>
-                </div>
+                    <CardContent>
+                        <form onSubmit={onSend} className="space-y-6">
+                            {/* From + Subject */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                    <Label htmlFor="from" className="text-sm font-medium">From</Label>
+                                    <Input
+                                        id="from"
+                                        type="email"
+                                        placeholder="you@company.com"
+                                        value={fromEmail}
+                                        onChange={(e) => setFromEmail(e.target.value)}
+                                        required
+                                        className="bg-input border-input-border focus:border-primary shadow-input"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="subject" className="text-sm font-medium">Subject</Label>
+                                    <Input
+                                        id="subject"
+                                        placeholder="Enter email subject"
+                                        value={subject}
+                                        onChange={(e) => setSubject(e.target.value)}
+                                        required
+                                        className="bg-input border-input-border focus:border-primary shadow-input"
+                                    />
+                                </div>
+                            </div>
 
-                <label className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                    <input type="checkbox" checked={validateExtras} onChange={e => setValidateExtras(e.target.checked)} />
-                    <span>Validate typed emails before sending</span>
-                </label>
+                            <Separator className="bg-border" />
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    <label className="label">
-                        <span>Plain Text</span>
-                        <textarea className="input" rows={8} value={textBody}
-                            onChange={e => setTextBody(e.target.value)} placeholder="Hello ..." />
-                    </label>
-                    <label className="label">
-                        <span>HTML (optional)</span>
-                        <textarea className="input" rows={8} value={htmlBody}
-                            onChange={e => setHtmlBody(e.target.value)} placeholder="<p>Hello</p>" />
-                    </label>
-                </div>
+                            {/* Recipients */}
+                            <div className="space-y-6">
+                                <h3 className="text-lg font-medium flex items-center space-x-2">
+                                    <Users className="h-5 w-5 text-primary" />
+                                    <span>Recipients</span>
+                                </h3>
 
-                <div>
-                    <button type="submit" className="btn">Send</button>
-                    {result && <span style={{ marginLeft: 12, color: '#8aa0b6' }}>{result}</span>}
-                </div>
-            </form>
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    {/* To */}
+                                    <div className="space-y-3">
+                                        <Label className="text-sm font-medium">To (Valid Contacts)</Label>
+                                        <MultiSelect
+                                            options={contactOptions}
+                                            selected={toIds}
+                                            onSelectedChange={setToIds}
+                                            placeholder="Select recipients..."
+                                        />
+                                        <div className="space-y-2">
+                                            <Label htmlFor="to-extra" className="text-xs text-muted-foreground">
+                                                Add Additional To Emails
+                                            </Label>
+                                            <Input
+                                                id="to-extra"
+                                                placeholder="email1@example.com, email2@example.com"
+                                                value={toExtra}
+                                                onChange={(e) => setToExtra(e.target.value)}
+                                                className="bg-input border-input-border text-sm"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* CC */}
+                                    <div className="space-y-3">
+                                        <Label className="text-sm font-medium">CC (Valid Contacts)</Label>
+                                        <MultiSelect
+                                            options={contactOptions}
+                                            selected={ccIds}
+                                            onSelectedChange={setCcIds}
+                                            placeholder="Select CC recipients..."
+                                        />
+                                        <div className="space-y-2">
+                                            <Label htmlFor="cc-extra" className="text-xs text-muted-foreground">
+                                                Add Additional CC Emails
+                                            </Label>
+                                            <Input
+                                                id="cc-extra"
+                                                placeholder="cc1@example.com, cc2@example.com"
+                                                value={ccExtra}
+                                                onChange={(e) => setCcExtra(e.target.value)}
+                                                className="bg-input border-input-border text-sm"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* BCC */}
+                                    <div className="space-y-3">
+                                        <Label className="text-sm font-medium">BCC (Valid Contacts)</Label>
+                                        <MultiSelect
+                                            options={contactOptions}
+                                            selected={bccIds}
+                                            onSelectedChange={setBccIds}
+                                            placeholder="Select BCC recipients..."
+                                        />
+                                        <div className="space-y-2">
+                                            <Label htmlFor="bcc-extra" className="text-xs text-muted-foreground">
+                                                Add Additional BCC Emails
+                                            </Label>
+                                            <Input
+                                                id="bcc-extra"
+                                                placeholder="bcc1@example.com, bcc2@example.com"
+                                                value={bccExtra}
+                                                onChange={(e) => setBccExtra(e.target.value)}
+                                                className="bg-input border-input-border text-sm"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center space-x-2">
+                                    <Checkbox
+                                        id="validate"
+                                        checked={validateExtras}
+                                        onCheckedChange={(checked) => setValidateExtras(Boolean(checked))}
+                                    />
+                                    <Label htmlFor="validate" className="text-sm text-muted-foreground cursor-pointer">
+                                        Validate typed emails before sending
+                                    </Label>
+                                </div>
+                            </div>
+
+                            <Separator className="bg-border" />
+
+                            {/* Message */}
+                            <div className="space-y-6">
+                                <h3 className="text-lg font-medium flex items-center space-x-2">
+                                    <Mail className="h-5 w-5 text-primary" />
+                                    <span>Message</span>
+                                </h3>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="text-body" className="text-sm font-medium">Plain Text</Label>
+                                        <Textarea
+                                            id="text-body"
+                                            placeholder="Enter your message here..."
+                                            value={textBody}
+                                            onChange={(e) => setTextBody(e.target.value)}
+                                            rows={10}
+                                            className="bg-input border-input-border focus:border-primary shadow-input resize-none"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="html-body" className="text-sm font-medium">HTML (Optional)</Label>
+                                        <Textarea
+                                            id="html-body"
+                                            placeholder="<p>Enter HTML content here...</p>"
+                                            value={htmlBody}
+                                            onChange={(e) => setHtmlBody(e.target.value)}
+                                            rows={10}
+                                            className="bg-input border-input-border focus:border-primary shadow-input resize-none font-mono text-sm"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Error */}
+                            {error && (
+                                <div className="flex items-center space-x-2 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+                                    <AlertCircle className="h-4 w-4 text-destructive" />
+                                    <span className="text-destructive text-sm">{error}</span>
+                                </div>
+                            )}
+
+                            {/* Footer */}
+                            <div className="flex justify-between items-center pt-6">
+                                <div className="text-sm text-muted-foreground">
+                                    Total recipients: {toIds.length + ccIds.length + bccIds.length + extrasCount}
+                                </div>
+                                <Button
+                                    type="submit"
+                                    disabled={sending || !fromEmail || !subject}
+                                    className="bg-gradient-primary hover:bg-primary-hover text-primary-foreground px-8 py-2 font-medium shadow-elegant"
+                                >
+                                    {sending ? (
+                                        <>
+                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground mr-2" />
+                                            Sending...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Send className="h-4 w-4 mr-2" />
+                                            Send Campaign
+                                        </>
+                                    )}
+                                </Button>
+                            </div>
+                        </form>
+                    </CardContent>
+                </Card>
+            </div>
         </div>
-    )
+    );
 }

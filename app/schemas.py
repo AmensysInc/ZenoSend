@@ -16,6 +16,7 @@ class ContactOut(BaseModel):
     status: str
     reason: Optional[str] = None
     provider: Optional[str] = None
+    owner_email: Optional[str] = None 
     class Config:
         from_attributes = True
 

@@ -9,9 +9,10 @@ services:
       - db
       - redis
     ports:
-      - "8081:8000" # API -> http://localhost:8080
+      - "8000:8000" # API -> http://localhost:8080
     volumes:
       - ./app:/code
+    working_dir: /code
     environment:
       PYTHONPATH: /code
     command: >
@@ -28,6 +29,7 @@ services:
       - redis
     volumes:
       - ./app:/code
+    working_dir: /code
     environment:
       PYTHONPATH: /code
     command: >
@@ -62,7 +64,8 @@ services:
     build:
       context: ./sendgrid_lite_frontend
       args:
-        VITE_API_BASE: /api # proxied by nginx inside this container
+        VITE_BASE: "/"
+        VITE_API_BASE: "http://localhost:8000" # proxied by nginx inside this container
         VITE_API_KEY: "" # key is injected by nginx, not exposed to browser
     container_name: sg-lite-frontend
     depends_on:
