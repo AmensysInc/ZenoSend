@@ -17,3 +17,5 @@ pandas
 openpyxl
 python-multipart
 pdfplumber
+sendgrid==6.11.0
+python-http-client==3.3.7
