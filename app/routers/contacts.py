@@ -3,18 +3,37 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select, or_, func
 from typing import Optional, List
+import logging
 
 from deps import get_db, get_current_user
 from models import Contact, User
-from schemas import ContactIn, ContactOut
+from schemas import ContactIn, ContactOut, normalize_email
 from email_validation import validate_email_record
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 
 def _to_out(c: Contact, owner_email: Optional[str]) -> ContactOut:
-    data = ContactOut.model_validate(c).model_dump()
-    data["owner_email"] = owner_email
+    """
+    Build a ContactOut while normalizing email to avoid crashes on legacy bad data.
+    """
+    data = {
+        "id": c.id,
+        "first_name": getattr(c, "first_name", None),
+        "last_name": getattr(c, "last_name", None),
+        "email": normalize_email(getattr(c, "email", None)),
+        "linkedin_url": getattr(c, "linkedin_url", None),
+        "company": getattr(c, "company", None),
+        "website": getattr(c, "website", None),
+        "phone": getattr(c, "phone", None),
+        "role": getattr(c, "role", None),
+        "status": getattr(c, "status", None),
+        "reason": getattr(c, "reason", None),
+        "provider": getattr(c, "provider", None),
+        "owner_email": owner_email,
+    }
     return ContactOut(**data)
 
 
@@ -53,7 +72,22 @@ def list_contacts(
         )
 
     rows = db.execute(stmt).all()
-    return [_to_out(c, owner_email) for c, owner_email in rows]
+
+    # Be defensive: if any row is still invalid after normalization, skip it instead of 500'ing.
+    out: List[ContactOut] = []
+    skipped = 0
+    for c, owner_email in rows:
+        try:
+            out.append(_to_out(c, owner_email))
+        except Exception as e:
+            skipped += 1
+            log.warning(
+                "Skipping contact id=%s invalid email=%r: %s",
+                getattr(c, "id", "?"),
+                getattr(c, "email", None),
+                e,
+            )
+    return out
 
 
 @router.post("", response_model=ContactOut, status_code=201)
@@ -62,13 +96,22 @@ def create_contact(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    e = body.email.lower()
+    e = normalize_email(body.email).lower()  # sanitize on write
+
     row = db.execute(select(Contact).where(Contact.email == e)).scalar_one_or_none()
     if row:
         # allow owner/admin to update minimal fields on create attempt
         if user.role != "admin" and row.owner_id != user.id:
             raise HTTPException(status_code=403, detail="Forbidden")
-        for f in ("first_name", "last_name", "linkedin_url", "company", "website", "phone", "role"):
+        for f in (
+            "first_name",
+            "last_name",
+            "linkedin_url",
+            "company",
+            "website",
+            "phone",
+            "role",
+        ):
             val = getattr(body, f)
             if val is not None:
                 setattr(row, f, val)
@@ -87,7 +130,8 @@ def create_contact(
         )
         db.add(row)
 
-    db.commit(); db.refresh(row)
+    db.commit()
+    db.refresh(row)
 
     owner_email = db.execute(select(User.email).where(User.id == row.owner_id)).scalar_one_or_none()
     return _to_out(row, owner_email)
@@ -111,15 +155,24 @@ def update_contact(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     # apply provided fields
-    for f in ("first_name", "last_name", "linkedin_url", "company", "website", "phone", "role"):
+    for f in (
+        "first_name",
+        "last_name",
+        "linkedin_url",
+        "company",
+        "website",
+        "phone",
+        "role",
+    ):
         val = getattr(body, f)
         if val is not None:
             setattr(c, f, val)
 
     if body.email is not None:
-        c.email = body.email.lower()
+        c.email = normalize_email(body.email).lower()  # sanitize on update
 
-    db.commit(); db.refresh(c)
+    db.commit()
+    db.refresh(c)
     owner_email = db.execute(select(User.email).where(User.id == c.owner_id)).scalar_one_or_none()
     return _to_out(c, owner_email)
 
@@ -135,7 +188,8 @@ def delete_contact(
         raise HTTPException(status_code=404, detail="Contact not found")
     if user.role != "admin" and c.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    db.delete(c); db.commit()
+    db.delete(c)
+    db.commit()
     return
 
 
@@ -147,14 +201,16 @@ def validate_one_api(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    email = str(payload.get("email", "")).strip().lower()
+    email = normalize_email(str(payload.get("email", ""))).strip().lower()
     if not email:
         raise HTTPException(status_code=400, detail="email required")
 
     row = db.execute(select(Contact).where(Contact.email == email)).scalar_one_or_none()
     if not row:
         row = Contact(email=email, owner_id=user.id, status="new")
-        db.add(row); db.commit(); db.refresh(row)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
 
     res = validate_email_record(email, timeout=8.0, do_smtp=use_smtp_probe)
     status_map = {"valid": "valid", "invalid": "invalid", "risky": "risky"}
@@ -191,7 +247,8 @@ def revalidate_contact(
     c.status   = status_map.get(res.get("verdict"), "unknown")
     c.reason   = res.get("reason")
     c.provider = res.get("provider")
-    db.commit(); db.refresh(c)
+    db.commit()
+    db.refresh(c)
 
     owner_email = db.execute(select(User.email).where(User.id == c.owner_id)).scalar_one_or_none()
     return _to_out(c, owner_email)
