@@ -47,12 +47,16 @@ export default function ContactsPage() {
 
     async function load() {
         setLoading(true);
+        setErr(null);
         try {
             const data = await getContacts();
             setRows(Array.isArray(data) ? data : []);
         } catch (e: any) {
-            setErr(e.message || "Failed to load contacts");
-            setRows([]); // Ensure rows is always an array
+            const errorMsg = e.message || "Failed to load contacts";
+            setErr(errorMsg);
+            console.error("Error loading contacts:", e);
+            // Don't clear rows on error - keep existing data visible
+            // setRows([]); // Only clear if we're sure we want to show empty state
         } finally {
             setLoading(false);
         }

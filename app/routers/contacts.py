@@ -72,7 +72,21 @@ def list_contacts(
         try:
             out.append(_to_out(c, owner_email))
         except Exception as e:
-            log.warning("Skipping bad contact id=%s: %s", getattr(c, "id", "?"), e)
+            log.error("Failed to serialize contact id=%s, email=%s: %s", 
+                     getattr(c, "id", "?"), getattr(c, "email", "?"), e)
+            # Include contact even if serialization fails, with error details
+            try:
+                out.append({
+                    "id": getattr(c, "id", 0),
+                    "email": str(getattr(c, "email", "invalid"))[:100],
+                    "first_name": getattr(c, "first_name", None),
+                    "last_name": getattr(c, "last_name", None),
+                    "status": getattr(c, "status", "error"),
+                    "reason": f"Serialization error: {str(e)[:100]}",
+                    "owner_email": owner_email,
+                })
+            except Exception:
+                pass  # Skip if we can't even create a basic record
     return out
 
 
